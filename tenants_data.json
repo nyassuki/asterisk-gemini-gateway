@@ -1,0 +1,236 @@
+[
+  {
+    "id": "tenant_telecom",
+    "name": "PT Telekom Seluler",
+    "businessCategory": "Telekomunikasi & Internet",
+    "extension": "501",
+    "agentName": "Siti - AI Customer Care",
+    "prebuiltVoice": "Zephyr",
+    "systemInstruction": "Anda adalah Siti, Asisten Layanan Pelanggan PT Telekom Seluler. Jawablah pertanyaan pelanggan secara ramah, ringkas, dan profesional. Gunakan informasi dari Dokumen Pengetahuan untuk menjawab pertanyaan seputar paket internet, tagihan, dan kendala jaringan.",
+    "greetingMessage": "Halo! Selamat datang di layanan pelanggan PT Telekom Seluler dengan Siti. Ada yang bisa saya bantu hari ini?",
+    "documents": [
+      {
+        "id": "doc_telko_1",
+        "title": "Katalog Paket Internet & Promo 5G",
+        "category": "Produk & Harga",
+        "content": "1. Paket Unlimited 5G Ultra: Rp 100.000/bulan (FUP 100GB, kecepatan turun ke 1Mbps setelah FUP).\n2. Paket Hemat Bulanan: Rp 50.000 (30GB kuota utama + 10GB kuota malam).\n3. Paket Harian Super: Rp 10.000 (5GB berlaku 24 jam).\nPembayaran dapat dilakukan via e-wallet (GoPay, OVO, Dana), Virtual Account BCA/Mandiri/BRI, atau minimarket terdekat.",
+        "updatedAt": 1784707176990
+      },
+      {
+        "id": "doc_telko_2",
+        "title": "Prosedur Penanganan Kendala Sinyal & Jaringan",
+        "category": "SOP Layanan",
+        "content": "Langkah penanganan awal jika sinyal hilang/lambat:\n1. Minta pelanggan melakukan restart perangkat atau aktifkan Mode Pesawat (Flight Mode) selama 10 detik.\n2. Pastikan lokasi pelanggan tidak dalam area perbaikan tower.\n3. Cek sisa kuota data.\n4. Jika kendala berlanjut lebih dari 1x24 jam, tawarkan pencatatan callback dari Tim Teknisi Lapangan menggunakan tool 'request_callback'.",
+        "updatedAt": 1784793576990
+      }
+    ],
+    "tools": [
+      {
+        "id": "request_callback",
+        "name": "Catat Callback Teknisi / CS",
+        "description": "Mencatat nomor HP dan alasan callback dari pelanggan jika membutuhkan penanganan lebih lanjut dari tim teknisi.",
+        "enabled": true
+      },
+      {
+        "id": "check_order_status",
+        "name": "Cek Status Laporan / Tiket",
+        "description": "Mengecek status tiket laporan gangguan berdasarkan nomor tiket.",
+        "enabled": true
+      }
+    ],
+    "callbackRequests": [
+      {
+        "id": "cb_101",
+        "tenantId": "tenant_telecom",
+        "callerName": "Bapak Ahmad",
+        "phoneNumber": "081299887766",
+        "reason": "Sinyal lambat di daerah Kebayoran Baru setelah hujan deras",
+        "preferredTime": "Sore jam 16:00 WIB",
+        "status": "pending",
+        "createdAt": 1784869176990
+      }
+    ]
+  },
+  {
+    "id": "tenant_clinic",
+    "name": "Klinik Sehat Utama",
+    "businessCategory": "Kesehatan & Medis",
+    "extension": "502",
+    "agentName": "Dr. Budi - Asisten Pendaftaran AI",
+    "prebuiltVoice": "Kore",
+    "systemInstruction": "Anda adalah Dr. Budi, Asisten Medis AI Klinik Sehat Utama. Layani pertanyaan pasien terkait jam pendaftaran, biaya dokter, syarat berobat, dan pendaftaran jadwal konsul.",
+    "greetingMessage": "Selamat datang di Klinik Sehat Utama. Saya Dr. Budi, asisten AI pendaftaran. Ada yang bisa saya bantu mengenai pendaftaran atau jadwal dokter?",
+    "documents": [
+      {
+        "id": "doc_med_1",
+        "title": "Jadwal Praktik Dokter & Tarif Konsultasi",
+        "category": "Layanan Medis",
+        "content": "Jam Operasional Klinik: Senin - Sabtu (08:00 - 21:00 WIB). Hari Minggu & Tanggal Merah Tutup.\nJadwal Dokter:\n- Dokter Umum (Dr. Andi): Senin-Jumat jam 08:00 - 14:00 (Biaya Rp 150.000).\n- Dokter Spesialis Anak (Dr. Maya): Senin-Sabtu jam 15:00 - 20:00 (Biaya Rp 250.000).\n- Dokter Gigi (Dr. Rina): Selasa & Kamis jam 13:00 - 18:00 (Biaya Rp 200.000).",
+        "updatedAt": 1784447976990
+      },
+      {
+        "id": "doc_med_2",
+        "title": "Syarat Berobat & Asuransi / BPJS",
+        "category": "Administrasi",
+        "content": "Syarat Pasien Baru:\n1. Membawa Kartu Identitas (KTP/SIM/KIA).\n2. Membawa Kartu BPJS Kesehatan aktif (untuk fasilitas kesehatan tingkat 1).\n3. Janji temu dapat didaftarkan H-1 melalui pencatatan callback pendaftaran.",
+        "updatedAt": 1784534376990
+      }
+    ],
+    "tools": [
+      {
+        "id": "request_callback",
+        "name": "Pendaftaran Janji Temu / Callback",
+        "description": "Mencatat nama pasien, nomor WhatsApp, dan jadwal dokter yang diinginkan.",
+        "enabled": true
+      }
+    ],
+    "callbackRequests": [
+      {
+        "id": "cb_102",
+        "tenantId": "tenant_clinic",
+        "callerName": "Ibu Ratna",
+        "phoneNumber": "085611223344",
+        "reason": "Pendaftaran konsul Spesialis Anak dengan Dr. Maya",
+        "preferredTime": "Besok Jam 16:00",
+        "status": "pending",
+        "createdAt": 1784861976990
+      }
+    ],
+    "aiModel": "Gemini 3.6 Flash"
+  },
+  {
+    "id": "tenant_shop",
+    "name": "Toko Online Berkah Store",
+    "businessCategory": "E-Commerce & Retail",
+    "extension": "503",
+    "agentName": "Budi - Customer Service Toko",
+    "prebuiltVoice": "Charon",
+    "systemInstruction": "Anda adalah Budi, Customer Service dari Toko Online Berkah Store. Layani pertanyaan pelanggan seputar kebijakan garansi, prosedur pengembalian barang (retur), dan konfirmasi pengiriman.",
+    "greetingMessage": "Halo! Terima kasih telah menghubungi Berkah Store. Saya Budi, siap membantu pertanyaan Anda mengenai produk, retur, atau pesanan Anda.",
+    "documents": [
+      {
+        "id": "doc_shop_1",
+        "title": "Syarat & Prosedur Retur Barang",
+        "category": "Kebijakan Toko",
+        "content": "Ketentuan Retur & Garansi Berkah Store:\n1. Pengajuan retur maksimal 7 hari kerja sejak barang diterima.\n2. Wajib melampirkan video unboxing utuh tanpa terpotong.\n3. Biaya kirim pengembalian ditanggung toko jika barang cacat produksi/salah kirim.\n4. Barang elektronik mendapatkan garansi resmi toko selama 12 bulan.",
+        "updatedAt": 1784620776990
+      }
+    ],
+    "tools": [
+      {
+        "id": "request_callback",
+        "name": "Bantuan Retur / Callback CS",
+        "description": "Mencatat nomor telepon dan nomor pesanan pelanggan untuk dibantu prosedur retur.",
+        "enabled": true
+      },
+      {
+        "id": "check_order_status",
+        "name": "Cek Resi & Status Pesanan",
+        "description": "Mengecek lokasi dan status pengiriman barang.",
+        "enabled": true
+      }
+    ],
+    "callbackRequests": [],
+    "aiModel": "Gemini 1.5 Flash"
+  },
+  {
+    "id": "tenant_cable",
+    "name": "Apex Cable & Broadband TV",
+    "businessCategory": "TV Cable & Fiber Broadband",
+    "description": "Premier cable television and high-speed fiber internet service provider.",
+    "extension": "508",
+    "agentName": "Sarah",
+    "prebuiltVoice": "Zephyr",
+    "systemInstruction": "You are Sarah, Senior Customer Care Representative at Apex Cable TV. Help callers explore cable channel lineups, HD packages, billing inquiries, and sports passes in clear English.",
+    "greetingMessage": "Hello! Thank you for calling Apex Cable TV. My name is Sarah. How can I help you with your cable TV or billing inquiry today?",
+    "agents": [
+      {
+        "id": "agent_cable_sarah",
+        "tenantId": "tenant_cable",
+        "agentName": "Sarah",
+        "role": "Customer Care & Channel Packages",
+        "extension": "508",
+        "pronunciation": "sarah cable advisor",
+        "language": "Inggris",
+        "dialect": "American English (US)",
+        "gender": "Perempuan",
+        "aiModel": "Gemini 2.5 Flash",
+        "personality": "You are Sarah, a cheerful, articulate, and highly helpful Customer Care Representative at Apex Cable TV.",
+        "timezone": "EST (New York)",
+        "speakingRate": "Normal",
+        "temperature": 0.3,
+        "defaultFallbackResponse": "I'm sorry, I don't have that channel or subscription detail on hand. Let me log a request for an account specialist.",
+        "prebuiltVoice": "Zephyr",
+        "systemInstruction": "You are Sarah, Senior Customer Care Representative at Apex Cable TV. Help callers explore cable channel lineups, HD packages, billing inquiries, and sports passes in clear English.",
+        "greetingMessage": "Hello! Thank you for calling Apex Cable TV. My name is Sarah. How can I help you with your cable TV or billing inquiry today?",
+        "agentStartsFirst": true,
+        "isDefault": true
+      },
+      {
+        "id": "agent_cable_mark",
+        "tenantId": "tenant_cable",
+        "agentName": "Mark (Tech Support)",
+        "role": "Set-Top Box & Signal Troubleshooting",
+        "extension": "509",
+        "pronunciation": "mark cable technician",
+        "language": "Inggris",
+        "dialect": "American English (US)",
+        "gender": "Laki-laki",
+        "aiModel": "Gemini 2.5 Pro",
+        "personality": "You are Mark, an analytical, patient, and highly technical support engineer specializing in TV signal diagnostics and set-top boxes.",
+        "timezone": "EST (New York)",
+        "speakingRate": "Normal",
+        "temperature": 0.2,
+        "defaultFallbackResponse": "I couldn't verify that error code immediately. Let me schedule a technician callback for a home diagnostic visit.",
+        "prebuiltVoice": "Puck",
+        "systemInstruction": "You are Mark, Lead Technical Specialist at Apex Cable TV. Help customers troubleshoot set-top box error codes (Error 102, black screen, HDMI connection issues), perform power resets, or log service technician dispatch tickets.",
+        "greetingMessage": "Hi there, this is Mark from Apex Cable Technical Support. Are you experiencing signal disruption or an error code on your set-top box?",
+        "agentStartsFirst": true,
+        "isDefault": false
+      }
+    ],
+    "documents": [
+      {
+        "id": "doc_cable_1",
+        "title": "Cable TV Channel Lineups & Premium Packages",
+        "category": "Packages & Pricing",
+        "content": "Apex Cable Channel Packages & Pricing:\n1. Essential Starter Pack: $49.99/month - Includes 75+ channels, local news, weather, and basic entertainment.\n2. Family Ultra HD Pass: $79.99/month - Includes 180+ channels featuring HBO Max, Showtime, Disney Channel, and 4K Sports.\n3. Sports Mega Pass Add-On: $29.99/month - Includes NFL Network, ESPN+, Premier League, NBA TV, and RedZone.\n4. Payment Methods: Auto-pay via Credit/Debit card, Online Banking, or phone bill payment.",
+        "updatedAt": 1784869200000
+      },
+      {
+        "id": "doc_cable_2",
+        "title": "Set-Top Box Troubleshooting & Error Codes",
+        category: "Technical SOP",
+        content: "Common Set-Top Box Troubleshooting Steps:\n1. Error Code 102 (Signal Lost / Black Screen):\n   - Verify HDMI cable is firmly connected between the set-top box and TV set.\n   - Unplug the power cable from the set-top box, wait 15 seconds, and plug it back in (Soft Reset).\n   - Ensure TV input/source is set to HDMI 1 or HDMI 2.\n2. Error Code 404 (Subscription Refresh Required):\n   - Perform account signal refresh via account portal or request a technician callback.\n3. If signal issue persists after reboot, log a technician callback using the 'request_callback' tool.",
+        updatedAt: 1784869200000
+      }
+    ],
+    "tools": [
+      {
+        "id": "request_callback",
+        "name": "Schedule Technician Callback",
+        "description": "Logs customer phone number and issue for a callback from a field service technician.",
+        "enabled": true
+      },
+      {
+        "id": "check_order_status",
+        "name": "Check Ticket & Order Status",
+        description: "Checks the status of service technician dispatch tickets.",
+        enabled: true
+      }
+    ],
+    "callbackRequests": [
+      {
+        "id": "cb_103",
+        "tenantId": "tenant_cable",
+        "callerName": "John Smith",
+        "phoneNumber": "+1-555-019-2831",
+        "reason": "Persistent Error Code 102 on living room set-top box after storm",
+        "preferredTime": "Today at 2:00 PM EST",
+        "status": "pending",
+        "createdAt": 1784865600000
+      }
+    ],
+    "aiModel": "Gemini 2.5 Flash"
+  }
+]

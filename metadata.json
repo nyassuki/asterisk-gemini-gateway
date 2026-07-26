@@ -1,0 +1,6 @@
+{
+  "name": "Asterisk Gemini Live Gateway",
+  "description": "A full-stack Asterisk PBX gateway and web simulator integrating real-time phone calls with Gemini Live API via AudioSocket.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

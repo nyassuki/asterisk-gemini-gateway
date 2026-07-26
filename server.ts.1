@@ -1,0 +1,471 @@
+import express from "express";
+import http from "http";
+import net from "net";
+import path from "path";
+import dotenv from "dotenv";
+import os from "os";
+import { WebSocket, WebSocketServer } from "ws";
+import { GoogleGenAI, Modality } from "@google/genai";
+import { createServer as createViteServer } from "vite";
+import { CallState, CallType, CallInfo, LogItem, SystemStatus, TenantProfile, AgentProfile, CallbackRequest } from "./src/types";
+import {
+  initTenantsStore,
+  getAllTenants,
+  getTenantAndAgentByExtension,
+  getTenantAndAgentBySipHeaders,
+  getTenantAndAgent,
+  addTenantCallbackRequest,
+  compileSystemInstruction,
+  getEffectiveTenantApiKeySync
+} from "./server/tenantsStore";
+import {
+  dbCreateAiSession,
+  dbEndAiSession
+} from "./src/db/repository";
+import { createApiRouter } from "./src/routes/api"; // <-- IMPORT ROUTER API
+
+dotenv.config();
+
+const app = express();
+const httpServer = http.createServer(app);
+const HTTP_PORT = process.env.HTTP_PORT || "3000";
+const TCP_PORT = process.env.TCP_PORT || "8050";
+
+// Initialize multi-tenant store
+(async () => {
+  await initTenantsStore();
+})();
+
+// Active calls & SIP sessions state
+const activeCalls = new Map<string, CallInfo & { socket?: net.Socket; ws?: WebSocket; geminiSession?: any }>();
+const systemLogs: LogItem[] = [];
+const activeSipSessions = new Map<string, any>();
+const dashboardClients = new Set<WebSocket>();
+
+// Initialize Gemini Client
+let ai: GoogleGenAI | null = null;
+try {
+  if (process.env.GEMINI_API_KEY) {
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { headers: { "User-Agent": "aistudio-build" } } });
+    console.log("Gemini client successfully initialized.");
+  } else {
+    console.warn("GEMINI_API_KEY environment variable is not defined.");
+  }
+} catch (err) {
+  console.error("Failed to initialize Gemini client:", err);
+}
+
+// Global logger helper
+function addLog(direction: "in" | "out" | "system", source: "Asterisk" | "Gateway" | "Gemini" | "Simulator", type: string, message: string, details?: string, tenantId?: string) {
+  const logItem: LogItem = { timestamp: Date.now(), direction, source, type, message, details, tenantId };
+  systemLogs.push(logItem);
+  if (systemLogs.length > 500) systemLogs.shift();
+  broadcastToDashboard({ event: "log_added", log: logItem });
+}
+
+function broadcastToDashboard(data: any) {
+  const msg = JSON.stringify(data);
+  dashboardClients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) client.send(msg);
+  });
+}
+
+// Resampling utility for PCM 16-bit little endian
+function resamplePCM(input: Buffer, fromSampleRate: number, toSampleRate: number): Buffer {
+  if (fromSampleRate === toSampleRate) return input;
+  const numSamples = input.length / 2;
+  const ratio = fromSampleRate / toSampleRate;
+  const newNumSamples = Math.round(numSamples / ratio);
+  const output = Buffer.alloc(newNumSamples * 2);
+
+  for (let i = 0; i < newNumSamples; i++) {
+    const inputIndex = i * ratio;
+    const indexLow = Math.floor(inputIndex);
+    const indexHigh = Math.min(numSamples - 1, indexLow + 1);
+    const weight = inputIndex - indexLow;
+
+    if (indexLow * 2 + 1 >= input.length) continue;
+    const sampleLow = input.readInt16LE(indexLow * 2);
+    const sampleHigh = input.readInt16LE(indexHigh * 2);
+    const interpolatedSample = Math.round(sampleLow * (1 - weight) + sampleHigh * weight);
+
+    if (i * 2 + 1 < output.length) output.writeInt16LE(interpolatedSample, i * 2);
+  }
+  return output;
+}
+
+const callAudioQueues = new WeakMap<net.Socket, any>();
+function initAudioPacing(socket: net.Socket) {
+  if (callAudioQueues.has(socket)) return;
+  const queue: any = { buffer: Buffer.alloc(0) };
+
+  queue.timer = setInterval(() => {
+    if (socket.destroyed) {
+      if (queue.timer) clearInterval(queue.timer);
+      return;
+    }
+    const CHUNK_SIZE = 320;
+    if (queue.buffer.length >= CHUNK_SIZE) {
+      let chunksSent = 0;
+      while (queue.buffer.length >= CHUNK_SIZE && chunksSent < 2) {
+        const chunk = queue.buffer.subarray(0, CHUNK_SIZE);
+        queue.buffer = queue.buffer.subarray(CHUNK_SIZE);
+        const packet = makeAudioSocketPacket(0x10, chunk);
+        try { socket.write(packet); } catch (e) {
+          if (queue.timer) clearInterval(queue.timer);
+          break;
+        }
+        chunksSent++;
+      }
+    } else {
+      const silenceChunk = Buffer.alloc(CHUNK_SIZE);
+      const packet = makeAudioSocketPacket(0x10, silenceChunk);
+      try { socket.write(packet); } catch (e) {}
+    }
+  }, 20);
+
+  callAudioQueues.set(socket, queue);
+}
+
+function makeAudioSocketPacket(type: number, payload: Buffer): Buffer {
+  const header = Buffer.alloc(3);
+  header.writeUInt8(type, 0);
+  header.writeUInt16BE(payload.length, 1);
+  return Buffer.concat([header, payload]);
+}
+
+function formatHexToUuid(hex: string): string {
+  if (hex.length === 32) {
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`.toLowerCase();
+  }
+  return hex;
+}
+
+function getCleanActiveCalls(): CallInfo[] {
+  return Array.from(activeCalls.values()).map(c => ({
+    id: c.id, tenantId: c.tenantId, tenantName: c.tenantName, agentId: c.agentId, agentName: c.agentName,
+    extension: c.extension, callerNumber: c.callerNumber || c.remoteAddress || "Web Simulator",
+    type: c.type, state: c.state, startTime: c.startTime, duration: Math.floor((Date.now() - c.startTime) / 1000),
+    uuid: c.uuid, remoteAddress: c.remoteAddress, userTranscripts: c.userTranscripts, aiTranscripts: c.aiTranscripts
+  }));
+}
+
+function buildTenantToolsConfig(tenant: TenantProfile): any[] {
+  const toolsConfig: any[] = [];
+  const enabledTools = (tenant.tools || []).filter(t => t.enabled);
+  const functionDeclarations: any[] = [];
+
+  if (enabledTools.some(t => t.id === "request_callback")) {
+    functionDeclarations.push({
+      name: "request_callback",
+      description: "Catat permintaan telepon kembali (callback).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          callerName: { type: "STRING" }, phoneNumber: { type: "STRING" },
+          reason: { type: "STRING" }, preferredTime: { type: "STRING" }
+        },
+        required: ["callerName", "phoneNumber", "reason"]
+      }
+    });
+  }
+
+  if (enabledTools.some(t => t.id === "check_order_status")) {
+    functionDeclarations.push({
+      name: "check_order_status",
+      description: "Cek status pesanan, tiket laporan, atau pendaftaran.",
+      parameters: { type: "OBJECT", properties: { orderId: { type: "STRING" } }, required: ["orderId"] }
+    });
+  }
+
+  if (functionDeclarations.length > 0) toolsConfig.push({ functionDeclarations });
+  return toolsConfig;
+}
+
+function forceTerminateCall(callId: string): boolean {
+  const callInfo = activeCalls.get(callId);
+  if (!callInfo) return false;
+  callInfo.state = CallState.DISCONNECTED;
+
+  dbEndAiSession(callId, {
+    agentId: callInfo.agentId, agentName: callInfo.agentName, extension: callInfo.extension,
+    type: callInfo.type, state: "force_terminated", duration: Math.floor((Date.now() - callInfo.startTime) / 1000)
+  }).catch(err => console.error("Error ending AiSession:", err));
+
+  if (callInfo.geminiSession) { try { callInfo.geminiSession.close(); } catch (e) {} }
+  if ((callInfo as any).socket && !(callInfo as any).socket.destroyed) {
+    try { (callInfo as any).socket.write(makeAudioSocketPacket(0x02, Buffer.alloc(0))); } catch (e) {}
+    try { (callInfo as any).socket.destroy(); } catch (e) {}
+  }
+  if ((callInfo as any).ws) {
+    try { (callInfo as any).ws.send(JSON.stringify({ event: "disconnected", reason: "force_terminated" })); } catch (e) {}
+    try { (callInfo as any).ws.close(); } catch (e) {}
+  }
+
+  activeCalls.delete(callId);
+  broadcastToDashboard({ event: "call_updated", calls: getCleanActiveCalls() });
+  addLog("system", "Gateway", "FORCE_TERMINATE", `Force terminated call ID '${callId}'`, undefined, callInfo.tenantId);
+  return true;
+}
+
+function getSystemStatus() {
+  return {
+    tcpPort: TCP_PORT, wsPort: HTTP_PORT,
+    activeCallsCount: Array.from(activeCalls.values()).filter(c => c.state === CallState.ACTIVE).length,
+    geminiConnected: ai !== null, isAsteriskServerRunning: tcpServer.listening,
+    totalTenantsCount: getAllTenants().length, load: os.loadavg(),
+    memory: { total: os.totalmem(), free: os.freemem() }, cpuCount: os.cpus().length,
+    activeAiSessions: Array.from(activeCalls.values()).filter(c => c.state === CallState.ACTIVE).length
+  };
+}
+
+// ----------------------------------------------------
+// Asterisk AudioSocket TCP Server
+// ----------------------------------------------------
+const tcpServer = net.createServer((socket) => {
+  const callId = `ast_${Math.random().toString(36).substring(2, 9)}`;
+  const remoteAddr = `${socket.remoteAddress}:${socket.remotePort}`;
+  const allTenants = getAllTenants();
+  const defaultResolved = getTenantAndAgent(allTenants[0]?.id || "");
+  let selectedTenant = defaultResolved?.tenant || allTenants[0];
+  let selectedAgent = defaultResolved?.agent || selectedTenant?.agents[0];
+
+  addLog("in", "Asterisk", "TCP_CONNECT", `Incoming Asterisk connection from ${remoteAddr}`, `Call ID: ${callId}`, selectedTenant?.id);
+  const callerNum = remoteAddr || "Asterisk Channel";
+
+  const callInfo: CallInfo & { socket: net.Socket; geminiSession?: any } = {
+    id: callId, tenantId: selectedTenant?.id, tenantName: selectedTenant?.name, agentId: selectedAgent?.id,
+    agentName: selectedAgent?.agentName, extension: selectedAgent?.extension, callerNumber: callerNum,
+    type: CallType.ASTERISK, state: CallState.CONNECTING, startTime: Date.now(), duration: 0,
+    remoteAddress: remoteAddr, userTranscripts: [], aiTranscripts: [], socket: socket
+  };
+
+  activeCalls.set(callId, callInfo);
+  broadcastToDashboard({ event: "call_updated", calls: getCleanActiveCalls() });
+
+  if (selectedTenant?.id) {
+    dbCreateAiSession({
+      id: callId, tenantId: selectedTenant.id, agentId: selectedAgent?.id, agentName: selectedAgent?.agentName,
+      channelId: callId, callerNumber: callerNum, sessionState: { agentId: selectedAgent?.id, agentName: selectedAgent?.agentName, extension: selectedAgent?.extension, type: CallType.ASTERISK, state: CallState.CONNECTING }
+    }).catch(err => console.error("Error creating AiSession:", err));
+  }
+
+  let buffer = Buffer.alloc(0);
+  let geminiConnected = false;
+  let asteriskSampleRate = 8000;
+
+  const effectiveKey = getEffectiveTenantApiKeySync(selectedTenant?.id, "gemini");
+  let activeAiClient = ai;
+  if (effectiveKey && effectiveKey !== process.env.GEMINI_API_KEY) {
+    try { activeAiClient = new GoogleGenAI({ apiKey: effectiveKey, httpOptions: { headers: { "User-Agent": "aistudio-build" } } }); } catch (e) {}
+  }
+
+  if (activeAiClient && selectedTenant && selectedAgent) {
+    const compiledSystemInstruction = compileSystemInstruction(selectedTenant, selectedAgent);
+    const tenantTools = buildTenantToolsConfig(selectedTenant);
+
+    activeAiClient.live.connect({
+      model: "gemini-3.1-flash-live-preview",
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: selectedAgent.prebuiltVoice || "Zephyr" } } },
+        systemInstruction: compiledSystemInstruction,
+        tools: tenantTools.length > 0 ? tenantTools : undefined
+      },
+      callbacks: {
+        onmessage: (message) => {
+          const audioBase64 = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+          if (audioBase64) {
+            const rawAudio24k = Buffer.from(audioBase64, "base64");
+            const resampledAudio = resamplePCM(rawAudio24k, 24000, asteriskSampleRate);
+            if (!socket.destroyed) socket.write(makeAudioSocketPacket(0x01, resampledAudio));
+          }
+
+          const text = message.serverContent?.modelTurn?.parts?.[0]?.text;
+          if (text) {
+            callInfo.aiTranscripts.push(text);
+            addLog("out", "Gemini", "TRANSCRIPT", `${selectedAgent.agentName}: ${text}`, `Call: ${callId}`, selectedTenant.id);
+            broadcastToDashboard({ event: "call_updated", calls: getCleanActiveCalls() });
+          }
+
+          const toolCall = (message as any).toolCall;
+          if (toolCall) {
+            for (const call of toolCall.functionCalls) {
+              if (call.name === "request_callback") {
+                const args = call.args as any;
+                const cbData: CallbackRequest = {
+                  id: `cb_${Date.now()}`, tenantId: selectedTenant.id,
+                  callerName: args.callerName || "Pemanggil Asterisk", phoneNumber: args.phoneNumber || "-",
+                  reason: args.reason || `Permintaan callback`, preferredTime: args.preferredTime || "Segera",
+                  status: "pending", createdAt: Date.now()
+                };
+                addTenantCallbackRequest(selectedTenant.id, cbData);
+                addLog("system", "Gemini", "TOOL_EXEC", `[CALLBACK STORED] Saved callback for '${selectedTenant.name}'`, undefined, selectedTenant.id);
+                if (callInfo.geminiSession) {
+                  callInfo.geminiSession.sendToolResponse({ functionResponses: [{ name: call.name, id: call.id, response: { output: { success: true, message: "Berhasil disimpan." } } }] });
+                }
+              }
+            }
+          }
+        },
+        onclose: () => { cleanupCall(); },
+        onerror: () => { cleanupCall(); }
+      }
+    }).then(session => {
+      geminiConnected = true;
+      callInfo.state = CallState.ACTIVE;
+      callInfo.geminiSession = session;
+      if (selectedAgent.agentStartsFirst !== false) {
+        session.sendClientContent({ turns: [{ role: "user", parts: [{ text: `[SISTEM]: Panggilan terhubung. Sapa pemanggil sekarang.` }] }], turnComplete: true });
+      }
+      broadcastToDashboard({ event: "call_updated", calls: getCleanActiveCalls() });
+    }).catch(() => { cleanupCall(); });
+  }
+
+  socket.on("data", (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    while (buffer.length >= 3) {
+      const type = buffer.readUInt8(0);
+      const length = buffer.readUInt16BE(1);
+      if (buffer.length < 3 + length) break;
+      const payload = buffer.subarray(3, 3 + length);
+      buffer = buffer.subarray(3 + length);
+      handlePacket(type, payload);
+    }
+  });
+
+  function handlePacket(type: number, payload: Buffer) {
+    if (type === 0x00 || type === 0x10) {
+      const rawUtf8 = payload.toString("utf-8").trim();
+      const rawHex = payload.toString("hex");
+      const formattedUuid = formatHexToUuid(rawHex);
+      callInfo.uuid = formattedUuid || rawUtf8 || rawHex;
+
+      let matched = activeSipSessions.get(formattedUuid) || activeSipSessions.get(rawUtf8) || activeSipSessions.get(rawHex);
+      if (matched) {
+        const res = getTenantAndAgentBySipHeaders(matched.apiKey, matched.tenantId, matched.agentId);
+        if (res) {
+          selectedTenant = res.tenant; selectedAgent = res.agent;
+          callInfo.tenantId = res.tenant.id; callInfo.tenantName = res.tenant.name;
+          callInfo.agentId = res.agent.id; callInfo.agentName = res.agent.agentName; callInfo.extension = res.agent.extension;
+        }
+        activeSipSessions.delete(formattedUuid);
+      } else {
+        const res = getTenantAndAgentBySipHeaders(rawUtf8, rawUtf8) || getTenantAndAgentByExtension(rawUtf8);
+        if (res) {
+          selectedTenant = res.tenant; selectedAgent = res.agent;
+          callInfo.tenantId = res.tenant.id; callInfo.tenantName = res.tenant.name;
+          callInfo.agentId = res.agent.id; callInfo.agentName = res.agent.agentName; callInfo.extension = res.agent.extension;
+        }
+      }
+      broadcastToDashboard({ event: "call_updated", calls: getCleanActiveCalls() });
+    } else if (type === 0x01) {
+      initAudioPacing(socket);
+      if (payload.length > 0 && geminiConnected && callInfo.geminiSession) {
+        const resampledInput = resamplePCM(payload, asteriskSampleRate, 16000);
+        callInfo.geminiSession.sendRealtimeInput({ audio: { data: resampledInput.toString("base64"), mimeType: "audio/pcm;rate=16000" } });
+      }
+    } else if (type === 0x02 || type === 0x03) { cleanupCall(); }
+  }
+
+  function cleanupCall() {
+    if (callInfo.state === CallState.DISCONNECTED) return;
+    callInfo.state = CallState.DISCONNECTED;
+    broadcastToDashboard({ event: "call_updated", calls: getCleanActiveCalls() });
+    if (callInfo.geminiSession) { try { callInfo.geminiSession.close(); } catch (e) {} }
+    if (!socket.destroyed) { try { socket.write(makeAudioSocketPacket(0x02, Buffer.alloc(0))); socket.destroy(); } catch (e) {} }
+    setTimeout(() => { activeCalls.delete(callId); broadcastToDashboard({ event: "call_updated", calls: getCleanActiveCalls() }); }, 5000);
+  }
+
+  socket.on("close", () => cleanupCall());
+  socket.on("error", () => cleanupCall());
+});
+
+tcpServer.listen(TCP_PORT, "0.0.0.0", () => {
+  console.log(`AudioSocket TCP Server listening on port ${TCP_PORT}`);
+});
+
+// ----------------------------------------------------
+// WebSocket Server for Web Simulator & Dashboard
+// ----------------------------------------------------
+const wss = new WebSocketServer({ noServer: true });
+httpServer.on("upgrade", (request, socket, head) => {
+  const pathname = new URL(request.url || "", `http://${request.headers.host}`).pathname;
+  if (pathname === "/api/ws" || pathname.startsWith("/ws")) {
+    wss.handleUpgrade(request, socket, head, (ws) => { wss.emit("connection", ws, request); });
+  } else { socket.destroy(); }
+});
+
+wss.on("connection", (ws, req) => {
+  const urlParams = new URL(req.url || "", `http://${req.headers.host}`).searchParams;
+  const isDashboard = urlParams.get("role") === "dashboard";
+
+  if (isDashboard) {
+    dashboardClients.add(ws);
+    ws.send(JSON.stringify({ event: "init", status: getSystemStatus(), calls: getCleanActiveCalls(), logs: systemLogs, tenants: getAllTenants() }));
+    ws.on("close", () => dashboardClients.delete(ws));
+    return;
+  }
+
+  // Simulator setup (disingkat untuk fokus pada struktur routing)
+  const callId = `sim_${Math.random().toString(36).substring(2, 9)}`;
+  const resolved = getTenantAndAgent(getAllTenants()[0]?.id || "");
+  const tenant = resolved?.tenant || getAllTenants()[0];
+  const agent = resolved?.agent || tenant.agents[0];
+
+  const callInfo: CallInfo & { ws: WebSocket; geminiSession?: any } = {
+    id: callId, tenantId: tenant.id, tenantName: tenant.name, agentId: agent.id, agentName: agent.agentName,
+    extension: agent.extension, callerNumber: "Web Simulator", type: CallType.SIMULATED, state: CallState.CONNECTING,
+    startTime: Date.now(), duration: 0, remoteAddress: "Web Browser", userTranscripts: [], aiTranscripts: [], ws: ws
+  };
+
+  activeCalls.set(callId, callInfo);
+  broadcastToDashboard({ event: "call_updated", calls: getCleanActiveCalls() });
+  ws.on("close", () => {
+    callInfo.state = CallState.DISCONNECTED;
+    if (callInfo.geminiSession) { try { callInfo.geminiSession.close(); } catch (e) {} }
+    activeCalls.delete(callId);
+    broadcastToDashboard({ event: "call_updated", calls: getCleanActiveCalls() });
+  });
+});
+
+// ----------------------------------------------------
+// MOUNT API ENDPOINT ROUTER (dari api.ts)
+// ----------------------------------------------------
+app.use(express.json());
+
+// Kita suntikkan context state dari server real-time ke modul API
+app.use(createApiRouter({
+  ai,
+  systemLogs,
+  activeSipSessions,
+  getCleanActiveCalls,
+  getSystemStatus,
+  forceTerminateCall,
+  addLog,
+  broadcastToDashboard,
+  TCP_PORT: String(TCP_PORT),
+  HTTP_PORT: String(HTTP_PORT)
+}));
+
+// ----------------------------------------------------
+// Configure Vite Integration & Start Server
+// ----------------------------------------------------
+async function startServer() {
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
+    app.use(vite.middlewares);
+    console.log("Vite development middleware integrated.");
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => res.sendFile(path.join(distPath, "index.html")));
+    console.log("Serving production static files from dist.");
+  }
+
+  httpServer.listen(HTTP_PORT, "0.0.0.0", () => {
+    console.log(`Full-stack Express server running on port ${HTTP_PORT}`);
+  });
+}
+
+startServer();

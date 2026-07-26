@@ -1,0 +1,682 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()"))
+  companyName          String                 @map("company_name")
+  brandName            String?                @map("brand_name")
+  taxIdNumber          String?                @map("tax_id_number")
+  taxAddress           String?                @map("tax_address")
+  operationalAddress   String?                @map("operational_address")
+  contactPersonName    String?                @map("contact_person_name")
+  contactPersonEmail   String?                @map("contact_person_email")
+  contactPersonPhone   String?                @map("contact_person_phone")
+  financeEmail         String?                @map("finance_email")
+  apiKey               String                 @unique @map("api_key")
+  apiSecret            String                 @map("api_secret")
+  balance              Decimal                @default(0.00) @map("balance") @db.Decimal(12, 2)
+  creditLimit          Decimal                @default(0.00) @map("credit_limit") @db.Decimal(12, 2)
+  billingType          BillingType            @default(prepaid) @map("billing_type")
+  status               TenantStatus           @default(active) @map("status")
+  timezone             String                 @default("UTC") @map("timezone")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  deletedAt            DateTime?              @map("deleted_at")
+  createdBy            String?                @map("created_by")
+  updatedBy            String?                @map("updated_by")
+  city                 String?                @map("city")
+  country              String?                @default("ID") @map("country")
+  nib                  String?                @map("nib")
+  npwp                 String?                @map("npwp")
+  postalCode           String?                @map("postal_code")
+  website              String?                @map("website")
+  name                 String?
+  businessCategory     String?                @map("business_category")
+  description          String?                @map("description")
+  metadata             Json?                  @map("metadata")
+  Agent                Agent[]
+  aiIdentities         AiIdentity[]           @relation("TenantAiIdentities")
+  aiSessions           AiSession[]            @relation("TenantAiSessions")
+  aiToolCalls          AiToolCall[]           @relation("TenantAiToolCalls")
+  ApiSecretRotationLog ApiSecretRotationLog[]
+  Campaign             Campaign[]
+  Cdr                  Cdr[]
+  ChannelConfig        ChannelConfig[]
+  ChatApp              ChatApp[]
+  ChatConversation     ChatConversation[]
+  Did                  Did[]
+  Extension            Extension[]
+  GlobalDid            GlobalDid[]
+  IvrMenu              IvrMenu[]
+  PricingModel         PricingModel[]
+  Queue                Queue[]
+  ragDocuments         RagDocument[]          @relation("TenantRagDocuments")
+  Recording            Recording[]
+  Subscription         Subscription[]
+  tenantApiKeys        TenantApiKey?          @relation("TenantApiKeys")
+  TenantUser           TenantUser[]
+  Transaction          Transaction[]
+
+  @@map("Tenant")
+}
+
+model AiIdentity {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()"))
+  tenantId           String             @map("tenant_id")
+  aiName             String?            @map("ai_name")
+  aiPronunciation    String?            @map("ai_pronunciation")
+  aiPersonality      String?            @map("ai_personality")
+  aiGreeting         String?            @map("ai_greeting")
+  aiProvider         String?            @default("gemini") @map("ai_provider")
+  aiProviderStatus   AiProviderStatus   @default(active) @map("ai_provider_status")
+  metadata           Json?              @map("metadata")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  aiDialect          String?            @map("ai_dialect")
+  aiLanguage         String?            @map("ai_language")
+  aiModelName        String?            @map("ai_model_name")
+  aiGender           String?            @default("male") @map("ai_gender")
+  bargeInSensitivity String?            @default("gemini_only") @map("barge_in_sensitivity")
+  tenant             Tenant             @relation("TenantAiIdentities", fields: [tenantId], references: [id])
+  ChatApp            ChatApp[]
+  ChatConversation   ChatConversation[]
+  ragDocuments       RagDocument[]      @relation("AiIdentityRagDocuments")
+
+  @@map("AiIdentity")
+}
+
+model AiSession {
+  id           String    @id @default(dbgenerated("gen_random_uuid()"))
+  tenantId     String    @map("tenant_id")
+  channelId    String?   @map("channel_id")
+  callerNumber String?   @map("caller_number")
+  sessionState Json?     @map("session_state")
+  startedAt    DateTime  @default(now()) @map("started_at")
+  endedAt      DateTime? @map("ended_at")
+  updated_at   DateTime  @default(now()) @db.Timestamp(6)
+  agentId      String?
+  tenant       Tenant    @relation("TenantAiSessions", fields: [tenantId], references: [id])
+
+  @@map("AiSession")
+}
+
+model RagDocument {
+  id            String      @id @default(dbgenerated("gen_random_uuid()"))
+  tenantId      String      @map("tenant_id")
+  filename      String      @map("filename")
+  fileFormat    String      @map("file_format")
+  fileSizeBytes BigInt      @default(0) @map("file_size_bytes")
+  mimeType      String?     @map("mime_type")
+  storagePath   String      @map("storage_path")
+  status        String      @default("processing") @map("status")
+  errorMessage  String?     @map("error_message")
+  chunkCount    Int         @default(0) @map("chunk_count")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+  aiIdentityId  String?     @map("ai_identity_id")
+  aiIdentity    AiIdentity? @relation("AiIdentityRagDocuments", fields: [aiIdentityId], references: [id])
+  tenant        Tenant      @relation("TenantRagDocuments", fields: [tenantId], references: [id])
+
+  @@index([tenantId, fileFormat])
+  @@map("RagDocument")
+}
+
+model AiToolCall {
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  tenantId  String   @map("tenant_id")
+  sessionId String?  @map("session_id")
+  toolName  String   @map("tool_name")
+  arguments Json?    @map("arguments")
+  result    Json?    @map("result")
+  status    String   @default("pending") @map("status")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+  tenant    Tenant   @relation("TenantAiToolCalls", fields: [tenantId], references: [id])
+
+  @@map("AiToolCall")
+}
+
+model TenantApiKey {
+  id        String   @id @default(dbgenerated("gen_random_uuid()"))
+  tenantId  String   @unique @map("tenant_id")
+  service   String   @default("gemini") @map("service")
+  apiKey    String   @map("api_key")
+  status    String   @default("active") @map("status")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  tenant    Tenant   @relation("TenantApiKeys", fields: [tenantId], references: [id])
+
+  @@map("TenantApiKey")
+}
+
+model CallbackRequest {
+  id            String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  tenantId      String   @map("tenant_id")
+  callerName    String?  @map("caller_name")
+  phoneNumber   String?  @map("phone_number")
+  reason        String?  @map("reason")
+  preferredTime String?  @map("preferred_time")
+  status        String   @default("pending") @map("status")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@map("CallbackRequest")
+}
+
+model VoiceProfile {
+  id          String   @id @default(uuid())
+  name        String   @map("name")
+  voice_name  String
+  language    String   @default("id-ID") @map("language")
+  gender      String?  @map("gender")
+  description String?  @map("description")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@map("voice_profiles")
+}
+
+model User {
+  id        String    @id @default(dbgenerated("gen_random_uuid()"))
+  uid       String    @unique(map: "users_uid_unique") @map("uid")
+  email     String    @map("email")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@map("users")
+}
+
+model AdminUser {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()"))
+  full_name              String
+  email                  String    @unique
+  password_hash          String
+  role                   AdminRole @default(support)
+  is_mfa_enabled         Boolean   @default(true)
+  is_email_verified      Boolean   @default(false)
+  reset_password_token   String?
+  reset_password_expires DateTime?
+  last_login_at          DateTime?
+  created_at             DateTime  @default(now())
+  updated_at             DateTime
+  deleted_at             DateTime?
+  created_by             String?
+  updated_by             String?
+}
+
+model Agent {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id            String
+  agent_identifier     String
+  full_name            String
+  skills               Json?
+  max_concurrent_chats Int                @default(1)
+  created_at           DateTime           @default(now())
+  updated_at           DateTime
+  created_by           String?
+  updated_by           String?
+  password             String?
+  pin                  String?
+  Tenant               Tenant             @relation(fields: [tenant_id], references: [id])
+  ChatConversation     ChatConversation[]
+
+  @@unique([tenant_id, agent_identifier])
+}
+
+model ApiSecretRotationLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id  String
+  rotated_by String?
+  created_at DateTime @default(now())
+  Tenant     Tenant   @relation(fields: [tenant_id], references: [id])
+
+  @@index([tenant_id, created_at])
+}
+
+model Campaign {
+  id                   String         @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id            String
+  name                 String
+  status               CampaignStatus @default(draft)
+  dialing_ratio        Decimal        @default(1.0) @db.Decimal(4, 2)
+  max_concurrent_calls Int            @default(1)
+  caller_id            String?
+  created_at           DateTime       @default(now())
+  updated_at           DateTime
+  created_by           String?
+  updated_by           String?
+  Tenant               Tenant         @relation(fields: [tenant_id], references: [id])
+  Lead                 Lead[]
+}
+
+model Cdr {
+  id             String        @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id      String
+  direction      CallDirection
+  caller_id      String
+  destination    String
+  start_time     DateTime
+  answer_time    DateTime?
+  end_time       DateTime?
+  duration_sec   Int           @default(0)
+  billable_units Int           @default(0)
+  hangup_cause   String?
+  cost           Decimal       @default(0.00) @db.Decimal(12, 4)
+  ai_transcript  String?
+  created_at     DateTime      @default(now())
+  updated_at     DateTime
+  created_by     String?
+  updated_by     String?
+  Tenant         Tenant        @relation(fields: [tenant_id], references: [id])
+  Recording      Recording[]
+
+  @@index([tenant_id, direction])
+  @@index([tenant_id, start_time])
+}
+
+model ChannelConfig {
+  id           String   @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id    String
+  channel_type String
+  identifier   String?
+  credentials  Json?
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now())
+  updated_at   DateTime
+  Tenant       Tenant   @relation(fields: [tenant_id], references: [id])
+}
+
+model ChatApp {
+  id               String             @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id        String
+  name             String
+  description      String?
+  channels         String[]
+  ai_identity_id   String?
+  created_at       DateTime           @default(now())
+  updated_at       DateTime
+  channel_configs  Json?              @default("{}")
+  AiIdentity       AiIdentity?        @relation(fields: [ai_identity_id], references: [id])
+  Tenant           Tenant             @relation(fields: [tenant_id], references: [id])
+  ChatConversation ChatConversation[]
+}
+
+model ChatConversation {
+  id             String        @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id      String
+  channel        String
+  customer_id    String
+  customer_name  String?
+  ai_identity_id String?
+  agent_id       String?
+  status         String
+  started_at     DateTime      @default(now())
+  updated_at     DateTime
+  chat_app_id    String?
+  Agent          Agent?        @relation(fields: [agent_id], references: [id])
+  AiIdentity     AiIdentity?   @relation(fields: [ai_identity_id], references: [id])
+  ChatApp        ChatApp?      @relation(fields: [chat_app_id], references: [id])
+  Tenant         Tenant        @relation(fields: [tenant_id], references: [id])
+  ChatMessage    ChatMessage[]
+
+  @@index([tenant_id, channel])
+  @@index([tenant_id, status, updated_at])
+}
+
+model ChatMessage {
+  id               String           @id @default(dbgenerated("gen_random_uuid()"))
+  conversation_id  String
+  sender_type      String
+  sender_id        String?
+  message_type     String           @default("text")
+  content          String
+  metadata         Json?
+  created_at       DateTime         @default(now())
+  ChatConversation ChatConversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+}
+
+model Did {
+  id           String    @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id    String
+  number       String    @unique
+  provider_id  String?
+  monthly_cost Decimal   @default(0.00) @db.Decimal(10, 2)
+  route_type   RouteType @default(extension)
+  route_config Json?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime
+  created_by   String?
+  updated_by   String?
+  Tenant       Tenant    @relation(fields: [tenant_id], references: [id])
+
+  @@index([tenant_id])
+}
+
+model Extension {
+  id                String          @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id         String
+  extension_number  String
+  display_name      String?
+  pjsip_username    String          @unique
+  pjsip_password    String
+  voicemail_enabled Boolean         @default(false)
+  is_webrtc         Boolean         @default(false)
+  created_at        DateTime        @default(now())
+  updated_at        DateTime
+  created_by        String?
+  updated_by        String?
+  status            ExtensionStatus @default(offline)
+  Tenant            Tenant          @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, extension_number])
+  @@index([tenant_id])
+}
+
+model GlobalDid {
+  id            String         @id @default(dbgenerated("gen_random_uuid()"))
+  number        String         @unique
+  country       String?
+  numberType    DidNumberType?
+  monthly_price Decimal        @db.Decimal(10, 2)
+  setup_price   Decimal        @default(0.00) @db.Decimal(10, 2)
+  is_active     Boolean        @default(true)
+  is_purchased  Boolean        @default(false)
+  tenant_id     String?
+  created_at    DateTime       @default(now())
+  updated_at    DateTime
+  created_by    String?
+  is_masking    Boolean        @default(false)
+  provider_id   String?
+  Provider      Provider?      @relation(fields: [provider_id], references: [id])
+  Tenant        Tenant?        @relation(fields: [tenant_id], references: [id])
+}
+
+model IvrMenu {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id          String
+  menu_identifier    String
+  greeting_audio_url String?
+  timeout_sec        Int      @default(5)
+  options            Json?
+  created_at         DateTime @default(now())
+  updated_at         DateTime
+  created_by         String?
+  updated_by         String?
+  Tenant             Tenant   @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, menu_identifier])
+}
+
+model Lead {
+  id               String     @id @default(dbgenerated("gen_random_uuid()"))
+  campaign_id      String
+  phone_number     String
+  custom_variables Json?
+  status           LeadStatus @default(pending)
+  call_attempts    Int        @default(0)
+  last_attempt_at  DateTime?
+  created_at       DateTime   @default(now())
+  updated_at       DateTime
+  created_by       String?
+  updated_by       String?
+  Campaign         Campaign   @relation(fields: [campaign_id], references: [id])
+}
+
+model PricingModel {
+  id               String          @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id        String?
+  billing_category BillingCategory
+  item_code        String
+  unit_size        Int             @default(1)
+  price_per_unit   Decimal         @db.Decimal(12, 4)
+  free_quota       Int             @default(0)
+  effective_date   DateTime
+  created_at       DateTime        @default(now())
+  updated_at       DateTime
+  created_by       String?
+  updated_by       String?
+  Tenant           Tenant?         @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, item_code])
+}
+
+model Provider {
+  id                     String      @id @default(dbgenerated("gen_random_uuid()"))
+  name                   String
+  trunk_name             String?
+  created_at             DateTime    @default(now())
+  updated_at             DateTime
+  max_concurrent_per_did Int         @default(1)
+  ip_address             String?
+  GlobalDid              GlobalDid[]
+}
+
+model Queue {
+  id            String        @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id     String
+  queue_name    String
+  strategy      QueueStrategy @default(ringall)
+  wrapup_time   Int           @default(0)
+  max_wait_time Int           @default(300)
+  created_at    DateTime      @default(now())
+  updated_at    DateTime
+  created_by    String?
+  updated_by    String?
+  Tenant        Tenant        @relation(fields: [tenant_id], references: [id])
+}
+
+model Recording {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id            String
+  cdr_id               String
+  channel_id           String
+  file_path            String
+  file_size_bytes      BigInt              @default(0)
+  duration_sec         Int                 @default(0)
+  transcription_status TranscriptionStatus @default(pending)
+  created_at           DateTime            @default(now())
+  updated_at           DateTime
+  created_by           String?
+  updated_by           String?
+  Cdr                  Cdr                 @relation(fields: [cdr_id], references: [id])
+  Tenant               Tenant              @relation(fields: [tenant_id], references: [id])
+}
+
+model Subscription {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id           String
+  item_code           String
+  quantity            Int       @default(0)
+  chargeable_quantity Int       @default(0)
+  monthly_cost        Decimal   @default(0.00) @db.Decimal(12, 4)
+  next_billing_date   DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime
+  created_by          String?
+  updated_by          String?
+  Tenant              Tenant    @relation(fields: [tenant_id], references: [id])
+
+  @@unique([tenant_id, item_code])
+}
+
+model TenantUser {
+  id                     String         @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id              String
+  full_name              String
+  email                  String         @unique
+  phone_number           String?
+  password_hash          String?
+  auth_provider          AuthProvider   @default(local)
+  oauth_provider_id      String?
+  is_email_verified      Boolean        @default(false)
+  verification_token     String?
+  reset_password_token   String?
+  reset_password_expires DateTime?
+  role                   TenantUserRole @default(viewer)
+  is_mfa_enabled         Boolean        @default(false)
+  last_login_at          DateTime?
+  created_at             DateTime       @default(now())
+  updated_at             DateTime
+  created_by             String?
+  updated_by             String?
+  mfa_secret             String?
+  Tenant                 Tenant         @relation(fields: [tenant_id], references: [id])
+
+  @@index([tenant_id])
+}
+
+model Transaction {
+  id               String          @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id        String
+  transaction_type TransactionType
+  amount           Decimal         @db.Decimal(12, 4)
+  running_balance  Decimal         @db.Decimal(12, 4)
+  description      String?
+  reference_id     String?
+  created_at       DateTime        @default(now())
+  created_by       String?
+  Tenant           Tenant          @relation(fields: [tenant_id], references: [id])
+
+  @@index([tenant_id, created_at])
+}
+
+model rag_documents {
+  id              String   @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id       String
+  filename        String
+  file_format     String
+  file_size_bytes BigInt   @default(0)
+  mime_type       String?
+  storage_path    String
+  status          String   @default("processing")
+  error_message   String?
+  chunk_count     Int      @default(0)
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+  updated_at      DateTime @default(now()) @db.Timestamp(6)
+  ai_identity_id  String?
+}
+
+model tenant_api_keys {
+  id         String   @id @default(dbgenerated("gen_random_uuid()"))
+  tenant_id  String   @unique
+  service    String   @default("gemini")
+  api_key    String
+  status     String   @default("active")
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @default(now()) @db.Timestamp(6)
+}
+
+enum BillingType {
+  prepaid
+  postpaid
+}
+
+enum TenantStatus {
+  active
+  suspended
+  grace_period
+  terminated
+  inactive
+  deleted
+}
+
+enum AiProviderStatus {
+  active
+  disabled
+  error
+}
+
+enum AdminRole {
+  superadmin
+  support
+  finance
+  sales
+}
+
+enum AuthProvider {
+  local
+  google
+  microsoft
+}
+
+enum BillingCategory {
+  call_traffic
+  subscription_seat
+  ai_usage
+}
+
+enum CallDirection {
+  inbound
+  outbound_api
+  outbound_pds
+}
+
+enum CampaignStatus {
+  draft
+  running
+  paused
+  completed
+}
+
+enum DidNumberType {
+  mobile
+  landline
+  tollfree
+}
+
+enum ExtensionStatus {
+  online
+  offline
+  busy
+}
+
+enum LeadStatus {
+  pending
+  calling
+  answered
+  failed
+  dnc
+}
+
+enum QueueStrategy {
+  ringall
+  roundrobin
+  leastrecent
+  fewestcalls
+}
+
+enum RouteType {
+  extension
+  voice_ai
+  queue
+  webhook
+  ivr
+  voicemail
+  unassigned
+}
+
+enum TenantUserRole {
+  owner
+  billing_admin
+  technical_admin
+  viewer
+}
+
+enum TransactionType {
+  charge_usage
+  charge_subscription
+  topup
+  refund
+  tax
+}
+
+enum TranscriptionStatus {
+  pending
+  completed
+  failed
+}
